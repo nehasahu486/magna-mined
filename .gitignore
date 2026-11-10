@@ -1,0 +1,21 @@
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Python caches & build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS & editor junk
+.DS_Store
+~$*.xlsx
+*.tmp
+.env

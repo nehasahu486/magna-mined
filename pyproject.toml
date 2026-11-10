@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "magna-mined"
+version = "0.1.0"
+description = "Automated Magnaporthe oryzae Literature Mining & Gene Annotation Tool"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Magna-Mined Team"}
+]
+dependencies = [
+    "pydantic>=2.0.0",
+    "requests>=2.28.0",
+    "openpyxl>=3.0.0",
+    "click>=8.0.0",
+    "rich>=13.0.0"
+]
+
+[project.optional-dependencies]
+ai = [
+    "google-genai>=0.1.1",
+    "anthropic>=0.18.0",
+    "openai>=1.12.0"
+]
+pdf = [
+    "pymupdf4llm>=0.0.10"
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0"
+]
+
+[project.scripts]
+magna-mined = "magnamined.pipeline:cli"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
