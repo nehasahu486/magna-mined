@@ -2,24 +2,24 @@
   <img src="src/img/magnamined_icontext.png" alt="Magna-Mined: AI-curated literature for Magnaporthe oryzae research" width="600">
 </p>
 
-# Magna-Mined: Automated *Magnaporthe* Literature Miner
-
 An automated literature mining, experimental evidence extraction, and gene annotation tool developed for the automated curation of ***Magnaporthe oryzae*** literature and ongoing maintenance of [**MagnaGenes v2.0**](https://github.com/nehasahu486/magnagenes_v2) ([web portal](https://nehasahu486.github.io/magnagenes_v2/)).
 
 ---
 
 ## 1. Purpose & Core Capabilities
 
-The [Zenodo MagnaGenes baseline (Record 4647766)](https://zenodo.org/records/4647766) catalogs **12,522 genes** in *M. oryzae* (the rice blast fungus, also known as *Pyricularia oryzae*):
-* **~1,636 genes** already hold baseline phenotype annotations (1,274 with mutant phenotypes + 362 tested as `none`).
+[**MagnaGenes v.1.0**](https://zenodo.org/records/4647766) (Foster et al., 2021) catalogs **12,522 genes** in *M. oryzae* (the rice blast fungus, also known as *Pyricularia oryzae*):
+* **~1,636 genes** already hold phenotype annotations in MagnaGenes v.1.0 (1,274 with mutant phenotypes + 362 tested as `none`).
 * **10,886 genes** are marked **`Not reported`** (unclassified).
 
-Magna-Mined keeps MagnaGenes v2.0 current automatically — without manual literature searches or paid AI API keys — through two core functions:
+Magna-Mined keeps MagnaGenes v2.0 current automatically (without manual literature searches or paid AI API keys) through two core functions:
 
-1. **Primary Function — Curating Unclassified Genes (Default)**:
+1. **Primary Function: Curating Unclassified Genes (Default)**:
    Every quarter or six months, it fetches newly published *M. oryzae* experimental genetics papers, skips the ~1,636 genes already classified in `MagnaGenes.csv`, and extracts phenotype and knockout records strictly for the **10,886 unclassified (`Not reported`) genes**.
-2. **Secondary Function — Double-Checking Classified Genes for Additional Functions**:
-   When a new paper demonstrates an **additional biological role** for an already-classified gene (for example, a gene previously listed only under `virulence` is shown to also regulate `conidiation`), `double-check` preserves the original baseline classification and logs the new finding and citation into **`additional_functions`** and **`additional_function_references`**.
+2. **Secondary Function: Double-Checking Classified Genes for Additional Functions**:
+   When a new paper demonstrates an **additional biological role** for an already-classified gene (for example, a gene previously listed only under `virulence` is shown to also regulate `conidiation`), `double-check` preserves the original MagnaGenes v.1.0 classification and logs the new finding and citation into **`additional_functions`** and **`additional_function_references`**.
+
+> **Reference (MagnaGenes v.1.0):** Foster AJ, Were VM, Yan X, Win J, Harant A, Langner T, Kamoun S, Talbot NJ (2021). *MagnaGenes (v.1.0): an open science database of gene function studies in the blast fungus Magnaporthe oryzae*. Zenodo. [10.5281/zenodo.4647766](https://doi.org/10.5281/zenodo.4647766)
 
 ---
 
@@ -30,11 +30,11 @@ Instead of querying Europe PMC 12,522 separate times (once per gene), Magna-Mine
 ### Does It Scan Just the Abstract or the Entire Paper?
 It scans **the full paper whenever full text is accessible**, and only falls back to the abstract for paywalled articles:
 
-1. **Priority 1 — Europe PMC Full-Text XML (`jats_xml`)**:
+1. **Priority 1: Europe PMC Full-Text XML (`jats_xml`)**:
    When a paper has an open-access PMC ID (`pmcid`), Magna-Mined downloads the structured `fullTextXML` from Europe PMC. It uses all sections (title, abstract, introduction/other, results, discussion, methods) to detect gene names and new inline aliases, and extracts phenotype and mutant evidence specifically from the **Results** and **Methods** sections.
-2. **Priority 2 — Full-Text PDF Extraction (`pdf`)**:
-   When XML is unavailable, it checks for an open-access PDF link via Europe PMC or Unpaywall (when `MAGNAMINED_CONTACT_EMAIL` is configured) — or reads a locally supplied PDF via `ingest-pdf`. It converts the PDF into reading-order text with `pymupdf4llm`, splits out **Results** and **Methods** headings (or falls back to the full PDF body text if section headings cannot be split cleanly), and runs extraction on those sections.
-3. **Priority 3 — Abstract-Only Fallback (`abstract_only`)**:
+2. **Priority 2: Full-Text PDF Extraction (`pdf`)**:
+   When XML is unavailable, it checks for an open-access PDF link via Europe PMC or Unpaywall (when `MAGNAMINED_CONTACT_EMAIL` is configured), or reads a locally supplied PDF via `ingest-pdf`. It converts the PDF into reading-order text with `pymupdf4llm`, splits out **Results** and **Methods** headings (or falls back to the full PDF body text if section headings cannot be split cleanly), and runs extraction on those sections.
+3. **Priority 3: Abstract-Only Fallback (`abstract_only`)**:
    If a paper is behind a publisher paywall and neither XML nor a PDF is available, Magna-Mined scans the **title and abstract** only and automatically caps its evidence rating at **`tier_4_low`** so curators know the full text was not inspected.
 
 ### Step-by-Step Pipeline
@@ -61,7 +61,7 @@ Europe PMC Paper Stream (year range or quarterly/6-month publication window)
 1. **Text-Based Pattern Search by Default (No Generative AI Required)**:
    Without `GEMINI_API_KEY`, Magna-Mined does not call any LLM. It uses deterministic **text-based pattern search** directly over sentences from the downloaded paper, so no claims or biological details can be invented.
 2. **Mandatory Exact-Quote Check**:
-   Every extraction — whether from the built-in text-based search or optional Gemini LLM — must carry a supporting quote copied from the paper. Before anything is stored in SQLite, an **exact-quote check** verifies that the quote matches text inside the actual paper (exact or whitespace/punctuation-normalized match). Any record whose quote cannot be found in the paper is automatically rejected.
+   Every extraction (whether from the built-in text-based search or optional Gemini LLM) must carry a supporting quote copied from the paper. Before anything is stored in SQLite, an **exact-quote check** verifies that the quote matches text inside the actual paper (exact or whitespace/punctuation-normalized match). Any record whose quote cannot be found in the paper is automatically rejected.
 3. **Strict Sentence Scoping & Irrelevant-Mention Filtering**:
    To prevent phenotypes from one gene bleeding onto another gene mentioned nearby, extraction looks only at sentences that explicitly name the target gene or its mutant (plus an immediately following complementation/rescue sentence only if no other gene's mutant is named). Sentences where the gene is merely a `qRT-PCR`/`RNA-seq` expression target, fluorescent marker (`-GFP`), housekeeping/reference gene, protein domain reference, part of a multi-gene heatmap/list (≥3 `MGG_` IDs), or a sentence describing a *different* `Δgene` mutant are filtered out automatically.
 4. **Confidence Tiers & Curator Audit Trail**:
@@ -77,7 +77,7 @@ When multiple papers report findings on the **same gene**, Magna-Mined preserves
   `reconcile` ranks all extractions for that gene by precedence:
   `human-reviewed` > **confidence tier** (`tier_1_high` > `tier_2_high` > `tier_3_medium` > `tier_4_low`) > **text source** (`XML` > `PDF` > `abstract_only`) > **method** (`CRISPR/knockout/complementation` > `overexpression/RNAi` > `biochemical/computational`) > **complementation tested** > **newer publication year**.
   * If multiple papers at the same top confidence tier report complementary non-conflicting roles (for example, one reports `virulence` and another reports `conidiation`), both processes are merged cleanly (e.g., `virulence, conidiation`).
-  * If one paper reports that deleting the gene has **no defect** (`dispensable / wild-type-like`) while another reports a mutant defect — or two high-tier papers report completely disjoint phenotypes — Magna-Mined sets **`conflict_status = conflict`** and queues the competing PMIDs and quotes for human curator review (`magna-mined reconcile --review-id <ID>`).
+  * If one paper reports that deleting the gene has **no defect** (`dispensable / wild-type-like`) while another reports a mutant defect, or if two high-tier papers report completely disjoint phenotypes, Magna-Mined sets **`conflict_status = conflict`** and queues the competing PMIDs and quotes for human curator review (`magna-mined reconcile --review-id <ID>`).
 * **Already-classified baseline genes (`double-check` mode)**:
   Original baseline annotations in `baseline_process` are never overwritten; newly reported phenotypes from additional papers are appended to **`additional_functions`** alongside their PMIDs and years in **`additional_function_references`**.
 
@@ -118,7 +118,7 @@ source venv/bin/activate
 pip install -e .
 ```
 
-Seeds the SQLite database (`magnaporthe.db`) from the Zenodo baseline dataset (required once):
+Seeds the SQLite database (`magnaporthe.db`) from the MagnaGenes v.1.0 dataset (Foster et al., 2021; required once):
 
 ```bash
 # Seed from primary Excel dataset (recommended)
@@ -230,7 +230,7 @@ magna-mined export exports/newly_classified.csv --newly-classified
 # Mark a specific extraction ID as verified by the curator to resolve a conflict
 magna-mined reconcile --review-id 42 --notes "Verified in Guy11 background"
 
-# Evaluate Precision, Recall, F1 & quote accuracy against Zenodo 4647766 ground truth
+# Evaluate Precision, Recall, F1 & quote accuracy against MagnaGenes v.1.0 (Foster et al., 2021) ground truth
 magna-mined eval-benchmark --mode db
 magna-mined eval-benchmark --mode live --sample-size 6
 ```
@@ -265,7 +265,7 @@ When [`scripts/resolve_latest_fin_data.R`](scripts/resolve_latest_fin_data.R) is
 magna-mined/
 ├── README.md                      # Documentation & production CLI workflows
 ├── pyproject.toml                 # Package metadata, dependencies & CLI entrypoint
-├── data/                          # Baseline Zenodo Record 4647766
+├── data/                          # MagnaGenes v.1.0 dataset (Foster et al., 2021)
 │   ├── Magnagenes.xlsx
 │   └── MagnaGenes.csv
 ├── exports/                       # Generated reports & dated MagnaGenes sync outputs
@@ -284,7 +284,7 @@ magna-mined/
 │       ├── extractor.py           # Abstract screening, text-based rule search & optional Gemini LLM
 │       ├── paper_miner.py         # Bulk paper screening, multi-gene extraction & double-check engine
 │       ├── reconciler.py          # Evidence ranking, conflict detection & curator review queue
-│       ├── benchmark.py           # Zenodo ground-truth Precision/Recall/F1 evaluator
+│       ├── benchmark.py           # MagnaGenes v.1.0 ground-truth Precision/Recall/F1 evaluator
 │       ├── explorer.py            # Search, dossier & CSV/TSV/XLSX/JSON/HTML exports
 │       ├── magnagenes_sync.py     # Dated fin_data_YYYY-MM-DD.tsv exporter & deduplicated archiver
 │       └── pipeline.py            # Click CLI entrypoint (`magna-mined`)
@@ -297,5 +297,22 @@ Executes the test suite:
 ```
 
 ### Optional Environment Variables
-* `GEMINI_API_KEY`: Optional. Enables Google Gemini structured extraction instead of the default zero-dependency rule-based extractor.
+* `GEMINI_API_KEY`: Optional. Enables Google Gemini structured extraction instead of the default zero-dependency text-based rule search.
 * `MAGNAMINED_CONTACT_EMAIL`: Optional. Enables DOI-based open-access PDF lookup via the Unpaywall API when Europe PMC lacks full-text XML.
+
+Example terminal setup (macOS / Linux):
+```bash
+# 1. Enable Unpaywall open-access PDF lookup for papers without PMC XML
+export MAGNAMINED_CONTACT_EMAIL="curator@example.org"
+
+# 2. (Optional) Enable Gemini LLM extraction instead of built-in text-based search
+export GEMINI_API_KEY="AIzaSy...example_api_key..."
+
+# 3. Run quarterly mining with those environment variables active in the current shell
+magna-mined mine-papers --days 90 --max-papers 100
+```
+
+Or pass them for a single command without storing them in the shell session:
+```bash
+MAGNAMINED_CONTACT_EMAIL="curator@example.org" magna-mined mine-papers --days 90 --max-papers 100
+```

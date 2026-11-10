@@ -427,7 +427,7 @@ def show(gene, db):
         return
 
     g = dossier["gene"]
-    ko_str = f"Yes — {g.get('knockout_phenotype')}" if g.get("knockout_reported") else "No"
+    ko_str = f"Yes: {g.get('knockout_phenotype')}" if g.get("knockout_reported") else "No"
     add_str = g.get("additional_functions") or "-"
     add_ref = g.get("additional_function_references") or "-"
     header = (
