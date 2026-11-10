@@ -19,3 +19,6 @@ htmlcov/
 ~$*.xlsx
 *.tmp
 .env
+
+# Personal notes
+PROJECT_CONTEXT.md

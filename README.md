@@ -263,7 +263,6 @@ When [`scripts/resolve_latest_fin_data.R`](scripts/resolve_latest_fin_data.R) is
 
 ```
 magna-mined/
-├── PROJECT_CONTEXT.md             # Biological background & system specification
 ├── README.md                      # Documentation & production CLI workflows
 ├── pyproject.toml                 # Package metadata, dependencies & CLI entrypoint
 ├── data/                          # Baseline Zenodo Record 4647766
