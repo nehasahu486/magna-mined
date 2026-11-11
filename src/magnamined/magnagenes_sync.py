@@ -44,6 +44,19 @@ def _format_pubmed_url(raw_ref: Optional[str]) -> Optional[str]:
     return s
 
 
+def _format_quote(e: Dict[str, Any]) -> Optional[str]:
+    """Format one extraction as "[tier] PMID:x (year): quote" on a single line.
+    Tabs, newlines and pipes are replaced so the TSV stays one row per value."""
+    q = re.sub(r"\s+", " ", str(e.get("verbatim_quote") or "")).replace("|", "/").strip()
+    if not q:
+        return None
+    src = f"PMID:{e['pmid']}" if e.get("pmid") else "no PMID"
+    if e.get("publication_year"):
+        src += f" ({e['publication_year']})"
+    tier = e.get("confidence_tier") or "untiered"
+    return f"[{tier}] {src}: {q}"
+
+
 def find_latest_fin_data(directory: Path) -> Optional[Path]:
     """
     Return the latest dated `fin_data_YYYY-MM-DD.tsv` (or fallback `fin_data.tsv`)
@@ -147,7 +160,18 @@ class MagnaGenesSyncExporter:
                        OR (g.additional_functions IS NOT NULL AND TRIM(g.additional_functions) != '')
                     ORDER BY g.gene ASC
                 """
-            return [dict(r) for r in conn.execute(sql).fetchall()]
+            rows = [dict(r) for r in conn.execute(sql).fetchall()]
+            quotes: Dict[int, List[Dict[str, Any]]] = {}
+            for e in conn.execute(
+                """SELECT gene_id, pmid, publication_year, confidence_tier, verbatim_quote
+                   FROM extractions
+                   WHERE verbatim_quote IS NOT NULL AND TRIM(verbatim_quote) != ''
+                   ORDER BY gene_id, confidence_tier, publication_year DESC, pmid"""
+            ).fetchall():
+                quotes.setdefault(e["gene_id"], []).append(dict(e))
+            for g in rows:
+                g["evidence_quotes"] = quotes.get(g["id"], [])
+            return rows
 
     def _gene_to_long_rows(self, g: Dict[str, Any], include_baseline_meta: bool = False) -> List[Tuple[str, str, str]]:
         """Convert a gene record into `(Gene, variable, value)` tuples compatible with `prepare_data.R`."""
@@ -188,6 +212,11 @@ class MagnaGenesSyncExporter:
             _add("Additional.Functions", g["additional_functions"])
         if g.get("additional_function_references"):
             _add("Other.links.to.publication", g["additional_function_references"])
+        if g.get("other_fungi_notes"):
+            _add("Other.Fungi.Notes", g["other_fungi_notes"])
+        # One row per supporting excerpt: "[tier] PMID:x (year): quote"
+        for e in g.get("evidence_quotes") or []:
+            _add("Evidence.Quotes", _format_quote(e))
 
         if include_baseline_meta:
             if g.get("size_aa"):
