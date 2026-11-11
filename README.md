@@ -2,7 +2,7 @@
   <img src="src/img/magnamined_icontext.png" alt="Magna-Mined: Automated literature miner for Magnaporthe oryzae research" width="600">
 </p>
 
-An automated literature mining, experimental evidence extraction, and gene annotation tool developed for the automated curation of ***Magnaporthe oryzae*** literature and ongoing maintenance of [**MagnaGenes v2.0**](https://github.com/nehasahu486/magnagenes_v2) ([web portal](https://nehasahu486.github.io/magnagenes_v2/)).
+An automated literature mining and experimental evidence extraction tool developed for the automated curation of ***Magnaporthe oryzae*** literature and ongoing maintenance of [**MagnaGenes v2.0**](https://github.com/nehasahu486/magnagenes_v2) ([web portal](https://nehasahu486.github.io/magnagenes_v2/)).
 
 ---
 

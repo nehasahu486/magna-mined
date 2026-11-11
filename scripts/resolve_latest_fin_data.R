@@ -4,12 +4,12 @@
 # deduplicates by MD5 hash so `archive/` never accumulates duplicate files.
 
 resolve_and_archive_fin_data <- function(ann_dir) {
-  files <- list.files(ann_dir, pattern = "^fin_data(_\\d{4}-\\d{2}-\\d{2})?(_[0-9a-f]{8})?\\.tsv$", full.names = TRUE)
+  files <- list.files(ann_dir, pattern = "^fin_data(_[0-9]{4}-[0-9]{2}-[0-9]{2})?(_[0-9a-f]{8})?\\.tsv$", full.names = TRUE)
   if (!length(files)) stop("No fin_data*.tsv found in ", ann_dir)
 
   # Extract YYYY-MM-DD date from filename (undated fin_data.tsv sorts as 0000-00-00)
   extract_date <- function(p) {
-    m <- regmatches(basename(p), regexpr("\\d{4}-\\d{2}-\\d{2}", basename(p)))
+    m <- regmatches(basename(p), regexpr("[0-9]{4}-[0-9]{2}-[0-9]{2}", basename(p)))
     if (length(m) == 1 && nzchar(m)) m else "0000-00-00"
   }
   dates <- vapply(files, extract_date, character(1))
