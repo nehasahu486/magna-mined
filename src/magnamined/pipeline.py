@@ -151,6 +151,22 @@ def init_db(db, excel, csv):
         console.print(f"[yellow]Schema initialized at {db}. Neither {excel} nor {csv} found.[/yellow]")
 
 
+@cli.command(name="sync-aliases")
+@click.option("--db", default="magnaporthe.db", help="Path to SQLite database")
+def sync_aliases(db):
+    """Fetch M. oryzae gene names & synonyms from UniProt and index them in `gene_aliases`."""
+    from .entity_linker import sync_uniprot_aliases
+
+    manager = DatabaseManager(db)
+    console.print("Fetching M. oryzae gene names & synonyms from UniProt...")
+    res = sync_uniprot_aliases(manager)
+    console.print(
+        f"[bold green]✓ Alias sync complete:[/bold green] "
+        f"scanned {res['uniprot_rows_scanned']} UniProt entries, "
+        f"added {res['aliases_inserted']} new gene aliases."
+    )
+
+
 @cli.command()
 @click.argument("gene")
 @click.option("--db", default="magnaporthe.db", help="Path to SQLite database")
@@ -191,7 +207,7 @@ def benchmark(db):
 
 @cli.command(name="mine-papers")
 @click.option("--db", default="magnaporthe.db", help="Path to SQLite database")
-@click.option("--max-papers", default=25, help="Max papers to fetch (per year when --year-from/--year-to are set)")
+@click.option("--max-papers", default=25, help="Max papers to fetch (per year when --year-from/--year-to are set; 0 = unlimited)")
 @click.option("--page-size", default=25, help="Batch size per Europe PMC query")
 @click.option("--open-access-only/--all", default=False, help="Restrict to open access papers with full text XML")
 @click.option("--query", default=None, help="Custom Europe PMC search query")

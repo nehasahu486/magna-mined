@@ -68,6 +68,7 @@ class GeneEvidenceRecord(BaseModel):
     confidence_tier: EvidenceConfidence = Field(description="Confidence tier of the evidence")
     verbatim_quote: str = Field(description="Exact verbatim excerpt from the paper text supporting the claim (mandatory for grounding)")
     evidence_source: EvidenceSource = Field(default=EvidenceSource.JATS_XML, description="Document type the evidence was extracted from (jats_xml, pdf, abstract_only)")
+    species_side_note: Optional[str] = Field(default=None, description="Side note when pathogenicity is also reported in another fungus such as Colletotrichum")
     pmid: Optional[str] = Field(default=None, description="PubMed ID")
     pmcid: Optional[str] = Field(default=None, description="PubMed Central ID if open access")
     doi: Optional[str] = Field(default=None, description="Digital Object Identifier")

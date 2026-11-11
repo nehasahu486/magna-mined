@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/img/magnamined_icontext.png" alt="Magna-Mined: AI-curated literature for Magnaporthe oryzae research" width="600">
+  <img src="src/img/magnamined_icontext.png" alt="Magna-Mined: Automated literature miner for Magnaporthe oryzae research" width="600">
 </p>
 
 An automated literature mining, experimental evidence extraction, and gene annotation tool developed for the automated curation of ***Magnaporthe oryzae*** literature and ongoing maintenance of [**MagnaGenes v2.0**](https://github.com/nehasahu486/magnagenes_v2) ([web portal](https://nehasahu486.github.io/magnagenes_v2/)).
@@ -12,7 +12,7 @@ An automated literature mining, experimental evidence extraction, and gene annot
 * **~1,636 genes** already hold phenotype annotations in MagnaGenes v.1.0 (1,274 with mutant phenotypes + 362 tested as `none`).
 * **10,886 genes** are marked **`Not reported`** (unclassified).
 
-Magna-Mined keeps MagnaGenes v2.0 current automatically (without manual literature searches or paid AI API keys) through two core functions:
+Magna-Mined keeps MagnaGenes v2.0 current automatically (without manual literature searches or paid API keys) through two core functions:
 
 1. **Primary Function: Curating Unclassified Genes (Default)**:
    Every quarter or six months, it fetches newly published *M. oryzae* experimental genetics papers, skips the ~1,636 genes already classified in `MagnaGenes.csv`, and extracts phenotype and knockout records strictly for the **10,886 unclassified (`Not reported`) genes**.
@@ -57,9 +57,9 @@ Europe PMC Paper Stream (year range or quarterly/6-month publication window)
         flags conflicts, and exports HTML charts + dated `fin_data_YYYY-MM-DD.tsv` updates
 ```
 
-### How It Prevents Hallucinations & AI-Slop
-1. **Text-Based Pattern Search by Default (No Generative AI Required)**:
-   Without `GEMINI_API_KEY`, Magna-Mined does not call any LLM. It uses deterministic **text-based pattern search** directly over sentences from the downloaded paper, so no claims or biological details can be invented.
+### How It Prevents Fabricated Claims & False Positives
+1. **Text-Based Pattern Search by Default (No External Language Model Required)**:
+   Without `GEMINI_API_KEY`, Magna-Mined runs deterministic **text-based pattern search** directly over sentences from the downloaded paper rather than an external language model, so no claims or biological details can be invented.
 2. **Mandatory Exact-Quote Check**:
    Every extraction (whether from the built-in text-based search or optional Gemini LLM) must carry a supporting quote copied from the paper. Before anything is stored in SQLite, an **exact-quote check** verifies that the quote matches text inside the actual paper (exact or whitespace/punctuation-normalized match). Any record whose quote cannot be found in the paper is automatically rejected.
 3. **Strict Sentence Scoping & Irrelevant-Mention Filtering**:
@@ -129,6 +129,9 @@ magna-mined init-db --csv data/MagnaGenes.csv
 
 # Verify baseline counts (12,522 total genes, 10,886 unclassified)
 magna-mined stats
+
+# (Recommended once) Fetch M. oryzae gene names & synonyms from UniProt into gene_aliases
+magna-mined sync-aliases
 ```
 
 ---
@@ -155,8 +158,8 @@ magna-mined mine-papers --since 2026-01-01 --max-papers 200
 Processes a multi-year publication window systematically year by year:
 
 ```bash
-# Process up to 50 papers per year across 2022 and 2023
-magna-mined mine-papers --year-from 2022 --year-to 2023 --max-papers 50
+# Process all matching papers per year across 2021 to 2026 (--max-papers 0 = unlimited)
+magna-mined mine-papers --year-from 2021 --year-to 2026 --max-papers 0 --double-check
 ```
 
 ### C. Double-Checking Classified Genes for Additional Functions
@@ -222,6 +225,7 @@ magna-mined export exports/newly_classified.csv --newly-classified
 | **`knockout_phenotype`** | Confidence tier, affected process, phenotype summary, and PMID for the knockout |
 | **`additional_functions`** | New biological processes discovered beyond `baseline_process` |
 | **`additional_function_references`** | Citations (`PMID`, year, summary) supporting each additional function |
+| `other_fungi_notes` | Side note when a multi-fungus study also reports pathogenicity in other fungi (e.g. *Colletotrichum*) |
 | `consensus_tier` | `tier_1_high` (deletion + complementation) down to `tier_4_low` |
 | `conflict_status` | `none`, `conflict` (queued for curator review), or `resolved` |
 
@@ -288,7 +292,7 @@ magna-mined/
 │       ├── explorer.py            # Search, dossier & CSV/TSV/XLSX/JSON/HTML exports
 │       ├── magnagenes_sync.py     # Dated fin_data_YYYY-MM-DD.tsv exporter & deduplicated archiver
 │       └── pipeline.py            # Click CLI entrypoint (`magna-mined`)
-└── tests/                         # Pytest suite (54 unit & integration tests)
+└── tests/                         # Pytest suite (56 unit & integration tests)
 ```
 
 Executes the test suite:

@@ -79,9 +79,62 @@ class EvidenceExtractor:
 
         return False
 
+    OTHER_FUNGI_GENERA = (
+        "Colletotrichum", "Fusarium", "Botrytis", "Sclerotinia", "Alternaria",
+        "Ustilago", "Verticillium", "Bipolaris", "Rhizoctonia", "Cochliobolus",
+        "Zymoseptoria", "Puccinia", "Aspergillus", "Candida",
+    )
+
+    @classmethod
+    def detect_other_fungi_pathogenicity(cls, text: str) -> Dict[str, Any]:
+        """
+        Detect non-Magnaporthe fungi in a paper and check whether pathogenicity/virulence
+        is reported for them. Used to attach cross-species side notes on Magnaporthe papers
+        and to filter out comparative multi-fungus papers with no pathogenicity data.
+        """
+        if not text:
+            return {"other_fungi_present": [], "side_note": None}
+
+        fungi_pat = re.compile(
+            r"\b(" + "|".join(cls.OTHER_FUNGI_GENERA) + r")\b",
+            re.IGNORECASE,
+        )
+        other_present: List[str] = []
+        seen_gen = set()
+        for m in fungi_pat.finditer(text):
+            g = m.group(1).capitalize()
+            if g not in seen_gen:
+                seen_gen.add(g)
+                other_present.append(g)
+
+        if not other_present:
+            return {"other_fungi_present": [], "side_note": None}
+
+        path_kws = ("virulen", "pathogen", "infect", "lesion", "appressor", "penetrat", "disease")
+        with_path: List[str] = []
+        seen_path = set()
+        for sent in cls._split_sentences(cls._normalize_dashes(text)):
+            matches = list(fungi_pat.finditer(sent))
+            if not matches:
+                continue
+            s_low = sent.lower()
+            if any(k in s_low for k in path_kws):
+                for m in matches:
+                    g = m.group(1).capitalize()
+                    if g not in seen_path:
+                        seen_path.add(g)
+                        with_path.append(g)
+
+        note = (
+            f"Pathogenicity/virulence also reported in {', '.join(with_path)}"
+            if with_path else None
+        )
+        return {"other_fungi_present": other_present, "side_note": note}
+
     def triage_abstract(self, pmid: str, title: str, abstract: str) -> AbstractTriageResult:
         """
-        First-pass triage: Is this paper reporting experimental functional genetics in M. oryzae?
+        First-pass screening: Is this paper reporting experimental genetics in M. oryzae?
+        Rejects pure reviews and non-Magnaporthe studies before full-text downloads.
         """
         if not abstract:
             return AbstractTriageResult(
@@ -92,14 +145,29 @@ class EvidenceExtractor:
                 rationale="No abstract text available"
             )
 
+        title_lower = (title or "").lower()
         text_lower = f"{title} {abstract}".lower()
 
-        # Check organism
-        organism_matches = any(k in text_lower for k in ["magnaporthe", "pyricularia", "rice blast"])
+        # Require explicit Magnaporthe/Pyricularia/MGG/reference-strain evidence (not bare "rice blast")
+        organism_matches = any(k in text_lower for k in [
+            "magnaporthe", "pyricularia", "rice blast fungus", "m. oryzae", "p. oryzae",
+            "mgg_", "guy11", "70-15",
+        ])
 
         # Check experimental genetic manipulation terms
-        exp_terms = ["knockout", "deletion", "mutant", "complementation", "disruption", "Δ", "delta", "crispr"]
+        exp_terms = ["knockout", "deletion", "mutant", "complementation", "disruption", "overexpression", "rnai", "Δ", "∆", "delta", "crispr"]
         exp_matches = sum(1 for term in exp_terms if term in text_lower)
+
+        # Skip pure review titles when no direct genetic manipulation is described
+        is_review_title = bool(re.search(r"\b(?:a\s+review|systematic\s+review|mini-review|literature\s+review)\b", title_lower))
+        if is_review_title and exp_matches == 0:
+            return AbstractTriageResult(
+                pmid=pmid,
+                is_experimental=False,
+                target_organism_confirmed=organism_matches,
+                relevance_score=0.1,
+                rationale="Filtered out non-experimental review article."
+            )
 
         # Detect phenotypes
         suggested = []
@@ -305,6 +373,12 @@ class EvidenceExtractor:
         s_norm = EvidenceExtractor._normalize_dashes(sentence)
         s_lower = s_norm.lower()
         has_direct = EvidenceExtractor._has_direct_mutant_for_gene(s_norm, gene_pat)
+
+        # Skip sentences describing experiments strictly in another fungal genus (e.g. Colletotrichum ΔCg...)
+        other_fungi_re = re.compile(r"\b(?:" + "|".join(EvidenceExtractor.OTHER_FUNGI_GENERA) + r")\b", re.IGNORECASE)
+        if other_fungi_re.search(s_norm) or re.search(r"\b(?:[Δ∆]|delta[-_]?)(?:Cg|Fg|Bc|Ss|Vd|Um|An|Af)[A-Za-z0-9_]+\b", s_norm):
+            if not re.search(r"\b(?:magnaporthe|pyricularia|m\.\s*oryzae|p\.\s*oryzae|mgg[_-]?\d{5}|guy11|70-15)\b", s_norm, re.IGNORECASE):
+                return True
 
         # Expression-only / DEG / RT-qPCR sentences remain bystanders unless directly testing this gene's mutant phenotype
         is_expr_mention = any(k in s_lower for k in [

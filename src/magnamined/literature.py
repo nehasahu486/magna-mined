@@ -72,7 +72,7 @@ class EuropePMCClient:
 
     def stream_papers(
         self,
-        query: str = '("Magnaporthe oryzae" OR "Pyricularia oryzae" OR "rice blast") AND (mutant OR knockout OR deletion OR virulence OR appressorium OR conidiation OR pathogenesis)',
+        query: str = '("Magnaporthe oryzae" OR "Pyricularia oryzae") AND (mutant OR knockout OR deletion OR CRISPR OR disruption OR overexpression OR RNAi OR complementation OR appressorium OR conidiation)',
         max_papers: int = 100,
         page_size: int = 50,
         open_access_only: bool = False,
@@ -86,7 +86,7 @@ class EuropePMCClient:
         Stream articles from Europe PMC using cursor-based pagination.
         Supports optional exact year (`pub_year`), inclusive year range (`year_from`..`year_to`),
         or ISO date window (`date_from`..`date_to` via `FIRST_PDATE`, for quarterly/6-month syncs).
-        Yields article dictionaries until max_papers is reached or results exhausted.
+        Pass `max_papers <= 0` to stream all matching results until exhausted.
         """
         full_query = query
         if date_from or date_to:
@@ -104,9 +104,10 @@ class EuropePMCClient:
 
         cursor_mark = "*"
         yielded_count = 0
+        unlimited = max_papers is None or max_papers <= 0
 
-        while yielded_count < max_papers:
-            batch_limit = min(page_size, max_papers - yielded_count)
+        while unlimited or yielded_count < max_papers:
+            batch_limit = page_size if unlimited else min(page_size, max_papers - yielded_count)
             params = {
                 "query": full_query,
                 "format": "json",
@@ -116,14 +117,17 @@ class EuropePMCClient:
             }
             url = f"{self.BASE_URL}/search"
             data = None
-            for attempt in range(2):
+            for attempt in range(3):
                 try:
-                    response = self.session.get(url, params=params, timeout=30)
+                    response = self.session.get(url, params=params, timeout=45)
                     response.raise_for_status()
                     data = response.json()
                     break
                 except requests.RequestException:
-                    if attempt == 1:
+                    if attempt < 2:
+                        import time
+                        time.sleep(1.0 * (attempt + 1))
+                    else:
                         data = None
             if data is None:
                 break
@@ -146,7 +150,7 @@ class EuropePMCClient:
                     "pdf_url": self._pick_pdf_url(item)
                 }
                 yielded_count += 1
-                if yielded_count >= max_papers:
+                if not unlimited and yielded_count >= max_papers:
                     break
 
             next_cursor = data.get("nextCursorMark")
@@ -247,7 +251,7 @@ class EuropePMCClient:
         pdf_bytes = None
         for url in urls:
             try:
-                resp = self.session.get(url, timeout=40)
+                resp = self.session.get(url, timeout=20)
                 if (
                     resp.status_code == 200
                     and resp.content[:5] == b"%PDF-"
@@ -282,7 +286,11 @@ class EuropePMCClient:
         try:
             doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
             try:
-                md = pymupdf4llm.to_markdown(doc)
+                try:
+                    # Skip slow Tesseract OCR on figure images in digital PDFs
+                    md = pymupdf4llm.to_markdown(doc, use_ocr=False, show_progress=False)
+                except TypeError:
+                    md = pymupdf4llm.to_markdown(doc)
             finally:
                 doc.close()
             return md if md and md.strip() else None
@@ -371,6 +379,13 @@ class EuropePMCClient:
                     sections["discussion"] += body_text + "\n"
                 else:
                     sections["other"] += body_text + "\n"
+
+            # Also capture floating tables and back-matter notes/appendices (accession tables & symbols)
+            for extra_tag in (".//floats-group//table-wrap", ".//back//notes", ".//back//app-group", ".//back//ack"):
+                for node in root.findall(extra_tag):
+                    extra_text = " ".join("".join(node.itertext()).split())
+                    if extra_text:
+                        sections["other"] += extra_text + "\n"
 
             return sections
 

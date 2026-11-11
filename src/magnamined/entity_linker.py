@@ -111,6 +111,37 @@ class EntityLinker:
 
             self.mgg_to_symbols[gene] = aliases_for_this_gene
 
+        # Also load persisted synonyms from `gene_aliases` (e.g. UniProt-synced aliases)
+        for gene, db_aliases in self.db.get_all_gene_aliases().items():
+            if gene not in self.exact_mgg:
+                continue
+            bucket = self.mgg_to_symbols.setdefault(gene, [])
+            for al in db_aliases:
+                cleaned = al.strip()
+                if (
+                    cleaned
+                    and len(cleaned) >= 2
+                    and not cleaned.isdigit()
+                    and cleaned.upper() not in BIOLOGICAL_STOPWORDS
+                ):
+                    upper_symbol = cleaned.upper()
+                    all_symbols.add(cleaned)
+                    if cleaned not in bucket:
+                        bucket.append(cleaned)
+                    self.symbol_to_mggs.setdefault(upper_symbol, [])
+                    if gene not in self.symbol_to_mggs[upper_symbol]:
+                        self.symbol_to_mggs[upper_symbol].append(gene)
+                    # Also index stripped symbol (without Mo/Po prefix) so normalize_token resolves ΔMoXxx
+                    stripped_sym = re.sub(r"^(?:Mo|Po)[-_]?", "", cleaned, flags=re.IGNORECASE)
+                    if stripped_sym and len(stripped_sym) >= 3 and stripped_sym.upper() not in BIOLOGICAL_STOPWORDS:
+                        all_symbols.add(stripped_sym)
+                        su = stripped_sym.upper()
+                        self.symbol_to_mggs.setdefault(su, [])
+                        if gene not in self.symbol_to_mggs[su]:
+                            self.symbol_to_mggs[su].append(gene)
+            if not self.exact_mgg[gene].get("gene_name") and bucket:
+                self.exact_mgg[gene]["gene_name"] = bucket[0]
+
         # Also register known legacy mappings
         for old_id, new_id in LEGACY_MGG_MAP.items():
             if new_id in self.exact_mgg:
@@ -224,19 +255,24 @@ class EntityLinker:
             return {}
 
         patterns = [
-            # Symbol (MGG_12345) or Symbol (gene ID: MGG_12345)
+            # Symbol (MGG_12345) or Symbol [MGG_12345] or Symbol (gene ID: MGG_12345)
             re.compile(
-                r"\b([A-Za-z][A-Za-z0-9-]{1,11})\s*\(\s*(?:(?:gene|locus|id|accession)\s*[:#]?\s*)?(MGG[_-]?\d{5})(?:[T_\-]\d+)?\s*\)",
+                r"\b([A-Za-z][A-Za-z0-9-]{1,11})\s*[\(\[]\s*(?:(?:gene|locus|id|accession)\s*[:#]?\s*)?(MGG[_-]?\d{5})(?:[T_\-]\d+)?\s*[\)\]]",
                 re.IGNORECASE,
             ),
-            # MGG_12345 (Symbol)
+            # MGG_12345 (Symbol) or MGG_12345 [Symbol]
             re.compile(
-                r"\b(MGG[_-]?\d{5})(?:[T_\-]\d+)?\s*\(\s*([A-Za-z][A-Za-z0-9-]{1,11})\s*\)",
+                r"\b(MGG[_-]?\d{5})(?:[T_\-]\d+)?\s*[\(\[]\s*([A-Za-z][A-Za-z0-9-]{1,11})\s*[\)\]]",
                 re.IGNORECASE,
             ),
             # Symbol/MGG_12345 or MGG_12345/Symbol
             re.compile(
                 r"\b([A-Za-z][A-Za-z0-9-]{1,11})/(MGG[_-]?\d{5})(?:[T_\-]\d+)?\b",
+                re.IGNORECASE,
+            ),
+            # Symbol, encoded by MGG_12345
+            re.compile(
+                r"\b([A-Za-z][A-Za-z0-9-]{1,11}),?\s+(?:encoded by|designated|named)\s+(?:gene\s+)?(MGG[_-]?\d{5})(?:[T_\-]\d+)?\b",
                 re.IGNORECASE,
             ),
         ]
@@ -260,6 +296,8 @@ class EntityLinker:
         for m in patterns[1].finditer(text):
             _register(m.group(2), m.group(1))
         for m in patterns[2].finditer(text):
+            _register(m.group(1), m.group(2))
+        for m in patterns[3].finditer(text):
             _register(m.group(1), m.group(2))
 
         return discovered
@@ -366,3 +404,68 @@ class EntityLinker:
                 aliases.append(mo_sym)
 
         return aliases
+
+
+def sync_uniprot_aliases(db: DatabaseManager, timeout: int = 45) -> Dict[str, int]:
+    """
+    Fetch M. oryzae gene names & synonyms mapped to MGG_##### ordered locus names
+    from UniProt (taxid:242507 and taxid:318829) and populate `gene_aliases`.
+    """
+    import requests
+
+    pairs: List[Tuple[str, str]] = []
+    seen: Set[Tuple[str, str]] = set()
+    rows_fetched = 0
+
+    for taxid in ("242507", "318829"):
+        url = "https://rest.uniprot.org/uniprotkb/stream"
+        params = {
+            "query": f"organism_id:{taxid} AND (gene:*)",
+            "format": "tsv",
+            "fields": "gene_names,gene_primary,gene_synonym,gene_oln",
+        }
+        try:
+            resp = requests.get(url, params=params, timeout=timeout)
+            resp.raise_for_status()
+        except Exception:
+            continue
+
+        lines = resp.text.splitlines()
+        for line in lines[1:]:
+            rows_fetched += 1
+            parts = line.split("\t")
+            if len(parts) < 4:
+                continue
+            gene_names_all, primary, synonyms, oln_str = parts[0], parts[1], parts[2], parts[3]
+            combined_names = f"{gene_names_all} {oln_str}".strip()
+            mgg_matches = re.findall(r"MGG[_-]?\d{5}", combined_names, re.IGNORECASE)
+            if not mgg_matches:
+                continue
+            # Also ignore trivial ORF placeholders like MGG_01234 or MGCH7_...
+            raw_syms = re.split(r"[\s,;]+", f"{primary} {synonyms} {gene_names_all}".strip())
+            valid_syms = []
+            for sym in raw_syms:
+                s = sym.strip()
+                if (
+                    len(s) >= 3
+                    and not re.match(r"^(?:MGG|MGCH\d*)[_-]?\d*", s, re.IGNORECASE)
+                    and not re.match(r"^[A-Z0-9]{1,2}\d{3,}$", s)
+                    and EntityLinker._is_plausible_gene_symbol(s)
+                ):
+                    if s not in valid_syms:
+                        valid_syms.append(s)
+
+            for mgg_raw in mgg_matches:
+                mgg_norm = "MGG_" + re.search(r"\d{5}", mgg_raw).group(0)
+                for s in valid_syms:
+                    key = (mgg_norm, s)
+                    if key not in seen:
+                        seen.add(key)
+                        pairs.append(key)
+
+    inserted = db.add_gene_aliases_bulk(pairs, source="uniprot")
+    return {
+        "uniprot_rows_scanned": rows_fetched,
+        "candidate_alias_pairs": len(pairs),
+        "aliases_inserted": inserted,
+    }

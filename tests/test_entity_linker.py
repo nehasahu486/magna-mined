@@ -132,3 +132,16 @@ def test_extract_inline_aliases_for_unnamed_genes(linker):
     assert "MGG_01003" in by_id
     assert any(m.raw_text == "∆Moacb1" and m.canonical_id == "MGG_06177" and m.is_mutant for m in mentions)
     assert any(m.raw_text == "ΔMopct1" and m.canonical_id == "MGG_01003" and m.is_mutant for m in mentions)
+
+
+def test_gene_aliases_table_indexed_for_unnamed_genes(tmp_path):
+    db = DatabaseManager(str(tmp_path / "alias_test.db"))
+    with db.get_connection() as conn:
+        conn.execute("INSERT INTO genes (gene, gene_name, process_affected) VALUES ('MGG_06177', NULL, 'Not reported')")
+        conn.commit()
+    added = db.add_gene_aliases_bulk([("MGG_06177", "MoPcs60")], source="uniprot")
+    assert added == 1
+
+    mentions = db.linker.find_mentions("Deletion of ΔMoPcs60 caused conidiation defects in Magnaporthe oryzae.")
+    assert [m.canonical_id for m in mentions] == ["MGG_06177"]
+    assert mentions[0].canonical_name == "MoPcs60"

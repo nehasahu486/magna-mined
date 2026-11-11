@@ -20,8 +20,8 @@ from .schema import GeneEvidenceRecord, EvidenceSource, EvidenceConfidence
 console = Console()
 
 DEFAULT_SEARCH_QUERY = (
-    '("Magnaporthe oryzae" OR "Pyricularia oryzae" OR "rice blast") '
-    'AND (mutant OR knockout OR deletion OR virulence OR appressorium OR conidiation OR pathogenesis)'
+    '("Magnaporthe oryzae" OR "Pyricularia oryzae") '
+    'AND (mutant OR knockout OR deletion OR CRISPR OR disruption OR overexpression OR RNAi OR complementation OR appressorium OR conidiation)'
 )
 
 
@@ -172,6 +172,37 @@ class PaperMiner:
             full_text_body = ""
             evidence_source = EvidenceSource.ABSTRACT_ONLY
 
+        # Detect co-studied fungi (e.g. Colletotrichum) and cross-species pathogenicity side notes
+        combined_paper_text = f"{title}\n{abstract}\n{all_section_text or full_text_body}"
+        cross_fungi = self.extractor.detect_other_fungi_pathogenicity(combined_paper_text)
+        species_side_note = cross_fungi.get("side_note")
+        if cross_fungi.get("other_fungi_present") and not species_side_note:
+            mo_path_in_text = any(
+                k in f"{title} {abstract} {full_text_body}".lower()
+                for k in ("virulen", "pathogen", "infect", "appressor", "lesion", "disease")
+            )
+            if not mo_path_in_text:
+                self.db.record_processed_paper(
+                    pmid=pmid,
+                    pmcid=pmcid,
+                    doi=doi,
+                    title=title,
+                    pub_year=pub_year,
+                    is_open_access=is_oa,
+                    is_experimental=False,
+                    triage_rationale=f"Multi-fungus paper ({', '.join(cross_fungi['other_fungi_present'])}) with no pathogenicity reported.",
+                    genes_found=0,
+                    evidence_source=evidence_source.value,
+                    checked_additional=self.check_additional_functions,
+                )
+                return {
+                    "status": "non_experimental",
+                    "pmid": pmid,
+                    "pmcid": pmcid,
+                    "genes_extracted": 0,
+                    "extractions": [],
+                }
+
         # Filter candidate genes:
         # - Main mode (unclassified_only=True, check_additional_functions=False): only unclassified genes
         # - Double-check mode (check_additional_functions=True): inspect already-classified genes for NEW additional roles
@@ -254,6 +285,8 @@ class PaperMiner:
 
             if record:
                 record.evidence_source = record_source
+                if species_side_note:
+                    record.species_side_note = species_side_note
                 if record_source == EvidenceSource.ABSTRACT_ONLY:
                     # Abstract-only evidence can never exceed the lowest-confidence tier
                     # so curators know full text was unavailable / unverified.
@@ -359,14 +392,15 @@ class PaperMiner:
             else:
                 mode_label = "All Genes (including baseline-classified)"
             console.print(f"Curation Scope: [cyan]{mode_label}[/cyan]")
+            limit_str = "all" if (max_papers is None or max_papers <= 0) else str(max_papers)
             if date_from:
-                console.print(f"Date Window: [cyan]{date_from} -> {date_to or 'today'}[/cyan] (max [cyan]{max_papers}[/cyan] papers)")
+                console.print(f"Date Window: [cyan]{date_from} -> {date_to or 'today'}[/cyan] (max [cyan]{limit_str}[/cyan] papers)")
             elif year_from is not None and year_to is not None:
-                console.print(f"Publication Years: [cyan]{year_from} -> {year_to}[/cyan] (up to [cyan]{max_papers}[/cyan] papers/year)")
+                console.print(f"Publication Years: [cyan]{year_from} -> {year_to}[/cyan] (up to [cyan]{limit_str}[/cyan] papers/year)")
             elif year_from is not None or year_to is not None:
-                console.print(f"Publication Year Filter: [cyan]{year_from or '..'} to {year_to or '..'}[/cyan] (max [cyan]{max_papers}[/cyan] papers)")
+                console.print(f"Publication Year Filter: [cyan]{year_from or '..'} to {year_to or '..'}[/cyan] (max [cyan]{limit_str}[/cyan] papers)")
             else:
-                console.print(f"Target Max Papers: [cyan]{max_papers}[/cyan]")
+                console.print(f"Target Max Papers: [cyan]{limit_str}[/cyan]")
             console.print(f"Open Access Only: [cyan]{open_access_only}[/cyan]")
 
         stats = {

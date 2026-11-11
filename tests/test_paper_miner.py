@@ -272,3 +272,52 @@ def test_mine_papers_days_window(temp_engine):
 
     assert "date_from" in captured and captured["date_from"] is not None
     assert "date_to" in captured and captured["date_to"] is not None
+
+
+def test_multi_fungus_papers_and_cross_species_side_notes(temp_engine):
+    # 1. Pure Colletotrichum paper (no Magnaporthe) is rejected before XML/PDF fetch
+    colleto_only = {
+        "pmid": "900001",
+        "title": "The G-protein alpha subunit CgGa1 mediates virulence in Colletotrichum gloeosporioides",
+        "abstract": "Deletion of CgGa1 impaired pathogenicity in Colletotrichum gloeosporioides on mango.",
+        "pub_year": 2024,
+        "is_open_access": False,
+    }
+    r_other = temp_engine.process_paper(colleto_only, verbose=False)
+    assert r_other["status"] == "non_experimental"
+
+    # 2. Multi-fungus paper (Magnaporthe + Colletotrichum) WITH pathogenicity reported in Colletotrichum:
+    #    Extracts M. oryzae gene AND adds side note for Colletotrichum pathogenicity
+    shared_with_path = {
+        "pmid": "900002",
+        "title": "Conserved MAPK Pmk1 regulates appressorium development in Magnaporthe oryzae and Colletotrichum gloeosporioides",
+        "abstract": (
+            "Deletion of MoPMK1 in Magnaporthe oryzae abolished appressorium formation and virulence on rice. "
+            "Similarly, CgPmk1 is required for pathogenicity in Colletotrichum gloeosporioides."
+        ),
+        "pub_year": 2025,
+        "is_open_access": False,
+    }
+    r_shared = temp_engine.process_paper(shared_with_path, verbose=False)
+    assert r_shared["status"] == "curated"
+    assert r_shared["genes_extracted"] == 1
+    rec = r_shared["extractions"][0]
+    assert rec.gene_id == "MGG_09565"
+    assert rec.species_side_note == "Pathogenicity/virulence also reported in Colletotrichum"
+    gene_row = temp_engine.db.get_gene("MGG_09565")
+    assert "Colletotrichum" in (gene_row.get("other_fungi_notes") or "")
+
+    # 3. Multi-fungus paper (Magnaporthe + Colletotrichum) with NO pathogenicity reported -> ignored
+    shared_no_path = {
+        "pmid": "900003",
+        "title": "Comparative spore morphology of Magnaporthe oryzae and Colletotrichum gloeosporioides mutants",
+        "abstract": (
+            "We compared conidiation and colony diameter of MoENG1 mutants in Magnaporthe oryzae "
+            "and Colletotrichum gloeosporioides on oatmeal agar."
+        ),
+        "pub_year": 2025,
+        "is_open_access": False,
+    }
+    r_ignored = temp_engine.process_paper(shared_no_path, verbose=False)
+    assert r_ignored["status"] == "non_experimental"
+    assert r_ignored["genes_extracted"] == 0

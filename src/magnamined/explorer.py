@@ -183,8 +183,8 @@ class CatalogExplorer:
                 "gene", "gene_name", "baseline_process", "process_affected", "newly_classified",
                 "knockout_reported", "knockout_phenotype",
                 "additional_functions", "additional_function_references",
-                "consensus_tier", "conflict_status", "extraction_count", "size_aa",
-                "pmid_or_link_to_publication", "detailed_mutant_phenotype",
+                "other_fungi_notes", "consensus_tier", "conflict_status", "extraction_count",
+                "size_aa", "pmid_or_link_to_publication", "detailed_mutant_phenotype",
                 "blast2go_annotation", "pfam",
             ]
             with open(out, "w", newline="", encoding="utf-8") as f:
@@ -215,8 +215,8 @@ class CatalogExplorer:
                 "gene", "gene_name", "baseline_process", "process_affected", "newly_classified",
                 "knockout_reported", "knockout_phenotype",
                 "additional_functions", "additional_function_references",
-                "consensus_tier", "conflict_status", "extraction_count", "size_aa",
-                "pmid_or_link_to_publication", "detailed_mutant_phenotype",
+                "other_fungi_notes", "consensus_tier", "conflict_status", "extraction_count",
+                "size_aa", "pmid_or_link_to_publication", "detailed_mutant_phenotype",
                 "blast2go_annotation", "pfam",
             ]
             ws_genes.append(gene_cols)
@@ -228,7 +228,7 @@ class CatalogExplorer:
                 "mgg_id", "gene_name", "pmid", "pmcid", "doi", "publication_year",
                 "process_affected", "experimental_method", "complementation_tested",
                 "confidence_tier", "evidence_source", "reviewed_by_human",
-                "detailed_phenotype", "verbatim_quote", "paper_title",
+                "species_side_note", "detailed_phenotype", "verbatim_quote", "paper_title",
             ]
             ws_ext.append(ext_cols)
             for ext in extractions:
@@ -262,6 +262,7 @@ class CatalogExplorer:
                 "knockout_phenotype": g.get("knockout_phenotype") or "",
                 "additional_functions": g.get("additional_functions") or "",
                 "additional_function_references": g.get("additional_function_references") or "",
+                "other_fungi_notes": g.get("other_fungi_notes") or "",
                 "consensus_tier": g.get("consensus_tier") or "",
                 "conflict_status": g.get("conflict_status") or "none",
                 "blast2go": g.get("blast2go_annotation") or "",
@@ -274,6 +275,7 @@ class CatalogExplorer:
                         "method": e.get("experimental_method") or "",
                         "tier": e.get("confidence_tier") or "",
                         "source": e.get("evidence_source") or "",
+                        "side_note": e.get("species_side_note") or "",
                         "quote": e.get("verbatim_quote") or "",
                         "title": e.get("paper_title") or "",
                     }
@@ -548,7 +550,7 @@ function render() {{
   renderDynamicCharts(rows);
   tb.innerHTML = rows.slice(0, 300).map(r => {{
     const quotes = r.extractions.map(e =>
-      `<div class="quote-box"><span class="badge ${{esc(e.tier)}}">${{esc(e.tier)}}</span> <span class="badge">${{esc(e.source)}}</span> ${{e.pmid ? `<a href="https://pubmed.ncbi.nlm.nih.gov/${{esc(e.pmid)}}/" target="_blank">PMID:${{esc(e.pmid)}}</a>` : ''}} (${{esc(e.year)}})<div>${{esc(e.quote)}}</div></div>`
+      `<div class="quote-box"><span class="badge ${{esc(e.tier)}}">${{esc(e.tier)}}</span> <span class="badge">${{esc(e.source)}}</span> ${{e.pmid ? `<a href="https://pubmed.ncbi.nlm.nih.gov/${{esc(e.pmid)}}/" target="_blank">PMID:${{esc(e.pmid)}}</a>` : ''}} (${{esc(e.year)}})${{e.side_note ? ` <span class="badge tier_3_medium">${{esc(e.side_note)}}</span>` : ''}}<div>${{esc(e.quote)}}</div></div>`
     ).join('');
     const novelBadge = r.newly_classified ? `<span class="badge novel">Newly Classified</span>` : `<span class="badge">In Baseline</span>`;
     const conflictBadge = r.conflict_status === 'conflict' ? `<span class="badge conflict">conflict</span>` : '';
@@ -558,7 +560,10 @@ function render() {{
     const addHtml = r.additional_functions
       ? `<div style="margin-top:6px;"><span class="badge tier_2_high">+Additional: ${{esc(r.additional_functions)}}</span><div style="font-size:11px;color:#4b5563;margin-top:2px;">${{esc(r.additional_function_references)}}</div></div>`
       : '';
-    return `<tr><td><strong>${{esc(r.gene)}}</strong><br><span style="color:#6b7280">${{esc(r.gene_name)}}</span></td><td>${{esc(r.baseline_process)}}<br>${{novelBadge}}</td><td>${{esc(r.process_affected)}}${{addHtml}}</td><td>${{koHtml}}</td><td>${{r.consensus_tier ? `<span class="badge ${{esc(r.consensus_tier)}}">${{esc(r.consensus_tier)}}</span>` : '-'}} ${{conflictBadge}}</td><td>${{quotes || '<span style="color:#9ca3af">Baseline only</span>'}}</td></tr>`;
+    const sideHtml = r.other_fungi_notes
+      ? `<div style="margin-top:6px;font-size:11px;color:#854d0e;"><strong>Other fungi note:</strong> ${{esc(r.other_fungi_notes)}}</div>`
+      : '';
+    return `<tr><td><strong>${{esc(r.gene)}}</strong><br><span style="color:#6b7280">${{esc(r.gene_name)}}</span></td><td>${{esc(r.baseline_process)}}<br>${{novelBadge}}</td><td>${{esc(r.process_affected)}}${{addHtml}}${{sideHtml}}</td><td>${{koHtml}}</td><td>${{r.consensus_tier ? `<span class="badge ${{esc(r.consensus_tier)}}">${{esc(r.consensus_tier)}}</span>` : '-'}} ${{conflictBadge}}</td><td>${{quotes || '<span style="color:#9ca3af">Baseline only</span>'}}</td></tr>`;
   }}).join('');
 }}
 renderCoverageChart();

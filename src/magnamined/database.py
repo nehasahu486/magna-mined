@@ -94,8 +94,21 @@ class DatabaseManager:
                     verbatim_quote TEXT NOT NULL,
                     paper_title TEXT,
                     publication_year INTEGER,
+                    species_side_note TEXT,
                     extracted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (gene_id) REFERENCES genes(id) ON DELETE CASCADE
+                )
+            """)
+
+            # External & baseline gene aliases (UniProt / Ensembl / literature synonyms)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS gene_aliases (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    gene_id INTEGER NOT NULL,
+                    alias TEXT NOT NULL,
+                    source TEXT DEFAULT 'uniprot',
+                    FOREIGN KEY (gene_id) REFERENCES genes(id) ON DELETE CASCADE,
+                    UNIQUE(gene_id, alias)
                 )
             """)
 
@@ -129,6 +142,8 @@ class DatabaseManager:
                         cursor.execute("ALTER TABLE extractions ADD COLUMN reviewed_by_human BOOLEAN DEFAULT 0")
                     if "review_notes" not in existing_cols:
                         cursor.execute("ALTER TABLE extractions ADD COLUMN review_notes TEXT")
+                    if "species_side_note" not in existing_cols:
+                        cursor.execute("ALTER TABLE extractions ADD COLUMN species_side_note TEXT")
                 if table == "processed_papers":
                     if "checked_additional" not in existing_cols:
                         cursor.execute("ALTER TABLE processed_papers ADD COLUMN checked_additional BOOLEAN DEFAULT 0")
@@ -150,9 +165,12 @@ class DatabaseManager:
                 cursor.execute("ALTER TABLE genes ADD COLUMN additional_functions TEXT")
             if "additional_function_references" not in gene_cols:
                 cursor.execute("ALTER TABLE genes ADD COLUMN additional_function_references TEXT")
+            if "other_fungi_notes" not in gene_cols:
+                cursor.execute("ALTER TABLE genes ADD COLUMN other_fungi_notes TEXT")
 
             # Indexes for high-throughput queries
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_genes_gene ON genes(gene)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_gene_aliases_alias ON gene_aliases(alias)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_genes_name ON genes(gene_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_genes_process ON genes(process_affected)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_extractions_gene ON extractions(gene_id)")
@@ -343,7 +361,8 @@ class DatabaseManager:
                 """
                 SELECT id, process_affected, baseline_process, consensus_tier,
                        knockout_reported, knockout_phenotype,
-                       additional_functions, additional_function_references
+                       additional_functions, additional_function_references,
+                       other_fungi_notes
                 FROM genes WHERE UPPER(gene) = UPPER(?)
                 """,
                 (evidence.gene_id,)
@@ -382,8 +401,9 @@ class DatabaseManager:
                 INSERT INTO extractions (
                     gene_id, pmid, pmcid, doi, process_affected, detailed_phenotype,
                     experimental_method, complementation_tested, confidence_tier,
-                    verbatim_quote, paper_title, publication_year, evidence_source
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    verbatim_quote, paper_title, publication_year, evidence_source,
+                    species_side_note
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 db_gene_id,
                 evidence.pmid,
@@ -397,7 +417,8 @@ class DatabaseManager:
                 evidence.verbatim_quote,
                 evidence.paper_title,
                 evidence.publication_year,
-                evidence.evidence_source.value
+                evidence.evidence_source.value,
+                getattr(evidence, "species_side_note", None),
             ))
             extraction_id = cursor.lastrowid
 
@@ -443,6 +464,17 @@ class DatabaseManager:
                     elif new_ref not in add_refs_str:
                         add_refs_str = f"{add_refs_str}; {new_ref}"
 
+            # 2b. Track cross-species pathogenicity side notes (e.g. Colletotrichum)
+            other_notes_str = row["other_fungi_notes"]
+            side_note = (getattr(evidence, "species_side_note", None) or "").strip()
+            if side_note:
+                ref_label = f"PMID:{evidence.pmid}" if evidence.pmid else (evidence.doi or "N/A")
+                formatted_note = f"{side_note} ({ref_label})"
+                if not other_notes_str:
+                    other_notes_str = formatted_note
+                elif formatted_note not in other_notes_str and side_note not in other_notes_str:
+                    other_notes_str = f"{other_notes_str}; {formatted_note}"
+
             # 3. Update primary process_affected using tier precedence (unless preserving baseline primary)
             current_process = (row["process_affected"] or "not reported").strip().lower()
             existing_rank = self._TIER_RANK.get(row["consensus_tier"] or "", 0)
@@ -464,6 +496,7 @@ class DatabaseManager:
                         knockout_phenotype = ?,
                         additional_functions = ?,
                         additional_function_references = ?,
+                        other_fungi_notes = ?,
                         detailed_mutant_phenotype = COALESCE(detailed_mutant_phenotype || '; ', '') || ?,
                         pmid_or_link_to_publication = COALESCE(pmid_or_link_to_publication, ?)
                     WHERE id = ?
@@ -474,6 +507,7 @@ class DatabaseManager:
                     ko_phenotype,
                     add_funcs_str,
                     add_refs_str,
+                    other_notes_str,
                     f"[{evidence.confidence_tier.value}] {disp_tag}{evidence.detailed_phenotype}",
                     evidence.pmid or evidence.doi,
                     db_gene_id
@@ -484,18 +518,59 @@ class DatabaseManager:
                         knockout_reported = ?,
                         knockout_phenotype = ?,
                         additional_functions = ?,
-                        additional_function_references = ?
+                        additional_function_references = ?,
+                        other_fungi_notes = ?
                     WHERE id = ?
                 """, (
                     ko_reported,
                     ko_phenotype,
                     add_funcs_str,
                     add_refs_str,
+                    other_notes_str,
                     db_gene_id
                 ))
 
             conn.commit()
             return extraction_id
+
+    def add_gene_aliases_bulk(self, pairs: List[tuple], source: str = "uniprot") -> int:
+        """
+        Insert `(canonical_mgg_id, alias)` mappings into `gene_aliases`.
+        Returns the number of new alias rows inserted.
+        """
+        if not pairs:
+            return 0
+        with self.get_connection() as conn:
+            mgg_to_pk = {
+                r["gene"].strip().upper(): r["id"]
+                for r in conn.execute("SELECT id, gene FROM genes").fetchall()
+            }
+            before = conn.total_changes
+            to_insert = []
+            for mgg_id, alias in pairs:
+                pk = mgg_to_pk.get(str(mgg_id).strip().upper())
+                al = str(alias).strip()
+                if pk and al and len(al) >= 2:
+                    to_insert.append((pk, al, source))
+            conn.executemany(
+                "INSERT OR IGNORE INTO gene_aliases (gene_id, alias, source) VALUES (?, ?, ?)",
+                to_insert,
+            )
+            conn.commit()
+            inserted = conn.total_changes - before
+        self._linker = None
+        return inserted
+
+    def get_all_gene_aliases(self) -> Dict[str, List[str]]:
+        """Return `{canonical_mgg_upper: [alias, ...]}` from the `gene_aliases` table."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT g.gene, a.alias FROM gene_aliases a JOIN genes g ON g.id = a.gene_id"
+            ).fetchall()
+        out: Dict[str, List[str]] = {}
+        for r in rows:
+            out.setdefault(r["gene"].strip().upper(), []).append(r["alias"].strip())
+        return out
 
     def delete_extractions_for_paper(
         self, pmid: Optional[str] = None, pmcid: Optional[str] = None, doi: Optional[str] = None
